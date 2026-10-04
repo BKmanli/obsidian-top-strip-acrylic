@@ -24,7 +24,9 @@ The plugin has one material: Windows Acrylic. There are no additional material p
 
 ## Theme behavior
 
-The material follows Obsidian's app theme. It changes Electron's native theme source within the running Obsidian process. Native menus and other Obsidian windows in that process can therefore follow the same source. When multiple vaults use different themes, the last focused or theme-changed vault determines the shared native material theme.
+The material follows the base theme selected in Obsidian's Appearance settings. An explicit dark or light selection changes Electron's native theme source within the running Obsidian process. Selecting **Adapt to system** leaves the source on **system**, so automatic system theme changes keep working without restarting Obsidian. Native menus and other Obsidian windows in that process can follow the same source. When multiple vaults use different base themes, the last focused or theme-changed vault determines the shared native material theme.
+
+The temporary light/dark toggle command can change Obsidian's page colors while the saved base theme remains **Adapt to system**. In that case, the native material continues following the system; select an explicit base theme in Appearance to override it.
 
 This does not change Windows theme settings, registry values, or automatic day/night switching. Top icon colors follow the actual shared native theme so that they remain legible if another vault changes it.
 
@@ -50,7 +52,7 @@ npm test
 npm run check
 ```
 
-The tests cover top-strip boundaries, theme event coalescing, conflicts, unload restoration and unsupported platforms. They use a simulated DOM/native API and do not prove the Windows desktop blur itself. Native visual verification should be performed on Windows before a release.
+The tests cover top-strip boundaries, theme event coalescing, follow-system transitions, conflicts, unload restoration and unsupported platforms. They use a simulated DOM/native API and do not prove the Windows desktop blur itself. Native visual verification should be performed on Windows before a release. Theme integration uses the current app's internal vault configuration API, so compatibility should be checked after major Obsidian updates.
 
 ## License
 

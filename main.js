@@ -23,6 +23,9 @@ module.exports = class TopStripAcrylic extends Plugin {
         throw new Error('This Obsidian runtime does not support native Acrylic.');
       }
       this.originalThemeSource = this.nativeTheme.themeSource;
+      if (typeof this.app.vault.getConfig !== 'function' || typeof this.app.vault.on !== 'function') {
+        throw new Error('The app theme configuration API is unavailable in this Obsidian version.');
+      }
       this.style = this.doc.createElement('style');
       this.observedDark = this.isDark();
       this.themeObserver = new this.win.MutationObserver(() => {
@@ -38,6 +41,10 @@ module.exports = class TopStripAcrylic extends Plugin {
       this.nativeThemeUpdated = () => this.schedule(false);
       this.nativeTheme.on('updated', this.nativeThemeUpdated);
       this.register(() => this.nativeTheme.removeListener('updated', this.nativeThemeUpdated));
+      // Body classes need not change when switching from a fixed theme to system.
+      this.registerEvent(this.app.vault.on('config-changed', key => {
+        if (key === 'theme') this.schedule(true);
+      }));
       this.registerEvent(this.app.workspace.on('css-change', () => this.schedule(true)));
       this.registerEvent(this.app.workspace.on('layout-change', () => this.schedule(false)));
       this.registerDomEvent(this.win, 'resize', () => this.schedule(false));
@@ -125,7 +132,8 @@ module.exports = class TopStripAcrylic extends Plugin {
         this.nativeApplied = true;
       }
       if (syncTheme) {
-        const desired = this.isDark() ? 'dark' : 'light';
+        const mode = this.app.vault.getConfig('theme');
+        const desired = mode === 'obsidian' ? 'dark' : mode === 'moonstone' ? 'light' : 'system';
         if (this.nativeTheme.themeSource !== desired) {
           this.lastThemeSource = desired;
           this.nativeTheme.themeSource = desired;

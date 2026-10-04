@@ -5,6 +5,7 @@ Initial public version.
 - Native Windows Acrylic limited to the top tab and title strip.
 - Opaque sidebar and note content.
 - Native material and top icon colors follow the Obsidian app theme.
+- Adapt to system remains automatic; changing the base theme does not require an app restart.
 - Top portions of vertical workspace dividers are hidden.
 - Styles and the native theme source are restored when disabled, subject to other native-theme writers.
 - Single JavaScript plugin; no external executable, telemetry or runtime downloads.

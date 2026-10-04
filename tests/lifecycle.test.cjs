@@ -6,7 +6,7 @@ const { EventEmitter } = require('node:events');
 const { JSDOM } = require('jsdom');
 const source = fs.readFileSync(require.resolve('../main.js'), 'utf8');
 
-function fixture({ windows = true, backgroundImage = false, top = 40, sourceTheme = 'system', osRelease = '10.0.26100' } = {}) {
+function fixture({ windows = true, backgroundImage = false, top = 40, sourceTheme = 'system', osRelease = '10.0.26100', themeMode = 'obsidian', osDark = false } = {}) {
   const dom = new JSDOM(`<html><head><style>* { background-image: none; } body,.workspace,.workspace-tab-header-container { background-color: rgb(30,30,30); } .view-content { background-color: rgb(44,44,44); }</style></head><body class="theme-dark"><div class="workspace"><div class="workspace-tab-header-container"><button class="clickable-icon" id="top"></button><div class="mod-root"><div class="workspace-tab-header is-active"><span class="workspace-tab-header-inner-icon" id="active"></span></div></div></div><div class="workspace-leaf-resize-handle"></div><div class="view-content"><button class="clickable-icon" id="lower"></button></div></div></body></html>`);
   const { window } = dom;
   const frames = new Map();
@@ -24,12 +24,22 @@ function fixture({ windows = true, backgroundImage = false, top = 40, sourceThem
   const writes = [];
   Object.defineProperties(nativeTheme, {
     themeSource: { get: () => themeSource, set: value => { writes.push(value); themeSource = value; nativeTheme.emit('updated'); } },
-    shouldUseDarkColors: { get: () => themeSource === 'dark' }
+    shouldUseDarkColors: { get: () => themeSource === 'system' ? osDark : themeSource === 'dark' }
   });
   const materials = [];
   window.electronWindow = { setBackgroundMaterial: value => materials.push(value) };
   window.electron = { remote: { nativeTheme } };
   const workspaceEvents = new EventEmitter();
+  const vaultEvents = new EventEmitter();
+  const updateAppTheme = () => {
+    const dark = themeMode === 'system' ? nativeTheme.shouldUseDarkColors : themeMode === 'obsidian';
+    const before = window.document.body.classList.contains('theme-dark');
+    window.document.body.classList.toggle('theme-dark', dark);
+    window.document.body.classList.toggle('theme-light', !dark);
+    if (before !== dark) workspaceEvents.emit('css-change');
+  };
+  nativeTheme.on('updated', () => { if (themeMode === 'system') updateAppTheme(); });
+  updateAppTheme();
   const notices = [];
   class Plugin {
     constructor() { this.disposers = []; }
@@ -44,7 +54,10 @@ function fixture({ windows = true, backgroundImage = false, top = 40, sourceThem
     return { Plugin, Notice: class { constructor(text) { notices.push(text); } }, Platform: { isWin: windows } };
   }, console });
   const plugin = new module.exports();
-  plugin.app = { workspace: {
+  plugin.app = { vault: {
+    getConfig: key => key === 'theme' ? themeMode : undefined,
+    on: (event, callback) => { vaultEvents.on(event, callback); return () => vaultEvents.off(event, callback); }
+  }, workspace: {
     containerEl: window.document.querySelector('.workspace'),
     onLayoutReady: callback => callback(),
     on: (event, callback) => { workspaceEvents.on(event, callback); return () => workspaceEvents.off(event, callback); }
@@ -59,7 +72,9 @@ function fixture({ windows = true, backgroundImage = false, top = 40, sourceThem
     assert.fail('Animation frames did not settle; possible event feedback loop.');
   };
   const unload = () => { plugin.onunload(); plugin.disposers.forEach(dispose => dispose()); };
-  return { plugin, window, nativeTheme, materials, writes, notices, drain, unload, frames, workspaceEvents };
+  const setMode = mode => { themeMode = mode; updateAppTheme(); vaultEvents.emit('config-changed', 'theme'); };
+  const setOsDark = value => { osDark = value; if (themeSource === 'system') nativeTheme.emit('updated'); };
+  return { plugin, window, nativeTheme, materials, writes, notices, drain, unload, frames, workspaceEvents, setMode, setOsDark };
 }
 
 test('only the top strip becomes transparent and lower content/active-tab icons remain intact', async () => {
@@ -81,12 +96,12 @@ test('only the top strip becomes transparent and lower content/active-tab icons 
 test('app dark/light changes align native theme without a native updated feedback loop', async () => {
   const f = fixture(); f.plugin.onload(); await f.drain();
   assert.deepEqual(f.writes, ['dark']);
-  f.window.document.body.classList.replace('theme-dark', 'theme-light'); await f.drain();
+  f.setMode('moonstone'); await f.drain();
   assert.deepEqual(f.writes, ['dark', 'light']);
   assert.match(f.plugin.style.textContent, /#20242b/);
   f.nativeTheme.emit('updated'); await f.drain();
   assert.deepEqual(f.writes, ['dark', 'light']);
-  f.window.document.body.classList.replace('theme-light', 'theme-dark'); await f.drain();
+  f.setMode('obsidian'); await f.drain();
   assert.deepEqual(f.writes, ['dark', 'light', 'dark']);
   f.unload();
 });
@@ -101,7 +116,7 @@ test('unload restores inline values, native source, listeners and cancels queued
   assert.equal(body.style.backgroundImage, '');
   assert.equal(f.nativeTheme.themeSource, 'system');
   assert.deepEqual(f.materials, ['acrylic', 'none']);
-  assert.equal(f.nativeTheme.listenerCount('updated'), 0);
+  assert.equal(f.nativeTheme.listenerCount('updated'), 1); // The app's own listener remains.
   assert.equal(f.frames.size, 0);
   assert.equal(body.classList.contains('top-strip-acrylic-enabled'), false);
   assert.equal(f.window.document.querySelectorAll('.top-strip-acrylic-control').length, 0);
@@ -138,4 +153,26 @@ test('older Windows builds do not silently claim native Acrylic support', async 
   const f = fixture({ osRelease: '10.0.19045' }); f.plugin.onload(); await f.drain();
   assert.equal(f.plugin.status.applied, false); assert.match(f.notices[0], /Windows 11 22H2/);
   assert.deepEqual(f.materials, []); assert.deepEqual(f.writes, []); f.unload();
+});
+
+test('switching an explicit theme to follow-system works immediately even if body classes initially stay unchanged', async () => {
+  const f = fixture(); f.plugin.onload(); await f.drain();
+  assert.equal(f.nativeTheme.themeSource, 'dark');
+  f.setMode('system'); await f.drain();
+  assert.equal(f.nativeTheme.themeSource, 'system');
+  assert.equal(f.window.document.body.classList.contains('theme-light'), true);
+  assert.match(f.plugin.style.textContent, /#20242b/);
+  f.setOsDark(true); await f.drain();
+  assert.equal(f.nativeTheme.themeSource, 'system');
+  assert.equal(f.window.document.body.classList.contains('theme-dark'), true);
+  assert.match(f.plugin.style.textContent, /#f5f6f8/);
+  f.unload();
+});
+
+test('loading in follow-system mode never pins Electron to a fixed theme', async () => {
+  const f = fixture({ themeMode: 'system' }); f.plugin.onload(); await f.drain();
+  assert.equal(f.nativeTheme.themeSource, 'system'); assert.deepEqual(f.writes, []);
+  f.setOsDark(true); await f.drain();
+  assert.equal(f.window.document.body.classList.contains('theme-dark'), true);
+  assert.deepEqual(f.writes, []); f.unload();
 });
